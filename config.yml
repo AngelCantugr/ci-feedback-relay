@@ -1,0 +1,40 @@
+github:
+  app_id: ""                        # overridden by GITHUB_APP_ID env var
+  private_key_path: ".keys/app.pem" # overridden by GITHUB_PRIVATE_KEY_PATH
+  webhook_secret: ""                # overridden by GITHUB_WEBHOOK_SECRET
+  installation_id: ""               # overridden by GITHUB_INSTALLATION_ID
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+db:
+  path: "data/events.db"
+
+enrichment:
+  max_actionable_failures: 5        # cap on FailureDetail items per payload
+  test_body:
+    enabled: true
+    max_lines: 30
+  likely_cause:
+    enabled: true
+    provider: ollama
+    base_url: "http://localhost:11434"  # overridden by OLLAMA_BASE_URL
+    model: deepseek-coder-v2
+    max_react_steps: 4
+    timeout_seconds: 10
+    fallback_on_timeout: true
+    framework: langgraph
+
+circuit_breaker:
+  max_attempts: 3
+
+channel:
+  high_signal:
+    - ci_failure_regression
+    - human_changes_requested
+    - branch_conflict
+  low_signal:
+    - ci_pass
+    - ai_reviewer_suggestion
+    - label_added
