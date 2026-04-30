@@ -1,1 +1,11 @@
+fastapi
+uvicorn[standard]
+pygithub
+pyjwt[crypto]
+pydantic
+httpx
+langgraph
+langchain-core
+langchain-ollama
 PyYAML>=6.0
+mcp
