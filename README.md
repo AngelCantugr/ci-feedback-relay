@@ -128,3 +128,33 @@ cp .env.example .env
 | `GITHUB_INSTALLATION_ID` | Numeric Installation ID from step 10                      |
 | `OLLAMA_BASE_URL`        | Ollama endpoint (default `http://localhost:11434`)         |
 | `SMEE_URL`               | smee.io channel URL from step 4                           |
+
+---
+
+## Development
+
+### Smee Setup (one-time)
+
+The development server uses [smee.io](https://smee.io) to forward GitHub webhook events to
+your local machine.
+
+```bash
+# Install smee once
+npm install -g smee-client
+
+# Create a channel at https://smee.io/new → copy URL → add to .env as SMEE_URL
+```
+
+Add the channel URL to `.env`:
+
+```
+SMEE_URL=https://smee.io/your-channel-id
+```
+
+### Start Development
+
+```bash
+./scripts/start_dev.sh
+```
+
+This starts both the smee proxy and uvicorn together. Press Ctrl-C to stop both processes.
