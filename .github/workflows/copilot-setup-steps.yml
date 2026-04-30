@@ -1,0 +1,41 @@
+name: Copilot Setup Steps
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+permissions:
+  contents: read
+
+jobs:
+  # Job name MUST be `copilot-setup-steps` — GitHub uses this name as a discovery
+  # contract to run these steps before the Copilot cloud agent boots.
+  copilot-setup-steps:
+    name: Warm up Copilot agent environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Warm mypy cache
+        run: mypy src/ || true
+
+      - name: Verify ruff
+        run: ruff check . || true
