@@ -1,4 +1,6 @@
 ruff>=0.4
 mypy>=1.10
 pytest>=8.0
+pytest-asyncio
+httpx
 types-PyYAML>=6.0
