@@ -5,11 +5,17 @@ from __future__ import annotations
 import dataclasses
 
 from src.models import (
+    BranchContextPayload,
+    CIFailurePayload,
+    CircuitBreakerState,
     DiffHunk,
     FailureCategory,
     FailureDetail,
+    FailureSummary,
     LikelyCause,
     RecommendedResponse,
+    ReviewComment,
+    ReviewCommentsPayload,
 )
 
 
@@ -120,3 +126,141 @@ def test_failure_detail_is_dataclass():
     assert d["category"] == "infra"
     assert d["likely_cause"] is None
     assert d["relevant_diff_hunks"][0]["change_type"] == "added"
+
+
+def test_failure_summary_fields():
+    summary = FailureSummary(
+        total_failed=5,
+        total_reported=3,
+        check_run_name="CI / test (ubuntu-latest)",
+        conclusion="failure",
+        regressions_only=True,
+    )
+    assert summary.total_failed == 5
+    assert summary.total_reported == 3
+    assert summary.regressions_only is True
+    assert isinstance(summary.regressions_only, bool)
+
+
+def test_circuit_breaker_state_tripped_is_bool():
+    state = CircuitBreakerState(attempt_count=3, max_attempts=3, tripped=True)
+    assert state.tripped is True
+    assert isinstance(state.tripped, bool)
+
+    not_tripped = CircuitBreakerState(attempt_count=1, max_attempts=3, tripped=False)
+    assert not_tripped.tripped is False
+
+
+def test_ci_failure_payload_defaults():
+    payload = CIFailurePayload()
+    assert payload.event_type == "ci_failure"
+    assert payload.sha == ""
+    assert payload.branch == ""
+    assert payload.pr_number is None
+    assert payload.recommended_response == RecommendedResponse.SELF_CORRECT
+    assert payload.actionable_failures == []
+    assert payload.circuit_breaker.tripped is False
+    assert payload.failure_summary.total_failed == 0
+
+
+def test_ci_failure_payload_asdict():
+    detail = FailureDetail(
+        test_id="tests/test_foo.py::test_bar",
+        category=FailureCategory.ASSERTION,
+        was_passing_on_base=True,
+        relevant_diff_hunks=[],
+        failure_message="AssertionError",
+    )
+    payload = CIFailurePayload(
+        sha="abc123",
+        branch="feature/x",
+        actionable_failures=[detail],
+        recommended_response=RecommendedResponse.SELF_CORRECT,
+    )
+    d = dataclasses.asdict(payload)
+    assert d["event_type"] == "ci_failure"
+    assert d["recommended_response"] == "self_correct"
+    assert d["actionable_failures"][0]["category"] == "assertion"
+    assert d["circuit_breaker"]["tripped"] is False
+
+
+def test_branch_context_payload_defaults():
+    payload = BranchContextPayload()
+    assert payload.event_type == "branch_context"
+    assert payload.base_branch == "main"
+    assert payload.ci_status == ""
+    assert payload.open_pr_number is None
+    assert payload.has_merge_conflict is False
+
+
+def test_branch_context_payload_asdict():
+    payload = BranchContextPayload(
+        branch="main",
+        head_sha="deadbeef",
+        commits_ahead_of_base=2,
+        ci_status="failure",
+        open_pr_number=42,
+        has_merge_conflict=True,
+    )
+    d = dataclasses.asdict(payload)
+    assert d["event_type"] == "branch_context"
+    assert d["ci_status"] == "failure"
+    assert d["open_pr_number"] == 42
+    assert d["has_merge_conflict"] is True
+
+
+def test_review_comment_fields():
+    comment = ReviewComment(
+        comment_id=1,
+        body="Please fix the naming.",
+        author="reviewer1",
+        author_type="human_review",
+        file_path="src/db.py",
+        line=42,
+        is_blocking=True,
+    )
+    assert comment.comment_id == 1
+    assert comment.author_type == "human_review"
+    assert comment.is_blocking is True
+    assert isinstance(comment.is_blocking, bool)
+
+
+def test_review_comment_optional_defaults():
+    comment = ReviewComment(
+        comment_id=2,
+        body="LGTM",
+        author="bot[bot]",
+        author_type="ci_automated",
+    )
+    assert comment.file_path is None
+    assert comment.line is None
+    assert comment.is_blocking is False
+
+
+def test_review_comments_payload_defaults():
+    payload = ReviewCommentsPayload()
+    assert payload.event_type == "review_comments"
+    assert payload.pr_number == 0
+    assert payload.blocking_comments == []
+    assert payload.total_comments == 0
+
+
+def test_review_comments_payload_asdict():
+    comment = ReviewComment(
+        comment_id=10,
+        body="Must fix.",
+        author="alice",
+        author_type="human_review",
+        is_blocking=True,
+    )
+    payload = ReviewCommentsPayload(
+        pr_number=7,
+        blocking_comments=[comment],
+        total_comments=3,
+    )
+    d = dataclasses.asdict(payload)
+    assert d["event_type"] == "review_comments"
+    assert d["pr_number"] == 7
+    assert d["total_comments"] == 3
+    assert d["blocking_comments"][0]["author_type"] == "human_review"
+    assert d["blocking_comments"][0]["is_blocking"] is True
