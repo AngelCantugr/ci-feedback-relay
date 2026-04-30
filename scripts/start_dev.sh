@@ -3,7 +3,10 @@ set -euo pipefail
 
 # Load .env
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  set -a
+  # shellcheck source=.env
+  source .env
+  set +a
 fi
 
 SMEE_URL="${SMEE_URL:-}"
@@ -20,7 +23,7 @@ SMEE_PID=$!
 uvicorn src.webhook_handler:app --host 0.0.0.0 --port 8080 --reload &
 UVICORN_PID=$!
 
-# Trap Ctrl-C and kill both processes
-trap "kill $SMEE_PID $UVICORN_PID 2>/dev/null; exit" INT TERM
+# Trap Ctrl-C and kill both process groups
+trap "kill -- -$SMEE_PID -$UVICORN_PID 2>/dev/null; wait; exit" INT TERM
 
 wait
