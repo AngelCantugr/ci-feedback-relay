@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python /Users/angelcantu/GithubRepositories/angelcantugr/ci-feedback-relay/main/.claude/hooks/post_tool_use.py"
+          }
+        ]
+      }
+    ]
+  }
+}
