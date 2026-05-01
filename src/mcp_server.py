@@ -17,6 +17,23 @@ from src.models import BranchContextPayload, ReviewComment, ReviewCommentsPayloa
 server = Server("ci-feedback-relay")
 
 
+async def _drain_channel() -> None:
+    """Background task: drain channel queue and emit events to stderr."""
+    import json
+    import sys
+
+    from src.channel import _channel_queue
+
+    while True:
+        event = await _channel_queue.get()
+        try:
+            print(json.dumps(event), file=sys.stderr)
+        except Exception as exc:
+            print(f"channel drain error: {exc!r}", file=sys.stderr)
+        finally:
+            _channel_queue.task_done()
+
+
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
     return [
@@ -72,6 +89,23 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["pr_number"],
             },
         ),
+        types.Tool(
+            name="register_branch_watch",
+            description=(
+                "Register a branch for CI failure monitoring. "
+                "Called automatically by the PostToolUse hook after a git push. "
+                "Stores (branch → session_id) mapping so channel pushes are routed correctly. "
+                "Layer 1: single session — included for Layer 2 routing upgrade path."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "branch": {"type": "string"},
+                    "session_id": {"type": "string", "default": "default"},
+                },
+                "required": ["branch"],
+            },
+        ),
     ]
 
 
@@ -83,6 +117,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         return await _get_branch_context(arguments["branch"])
     if name == "get_review_comments":
         return await _get_review_comments(int(arguments["pr_number"]))
+    if name == "register_branch_watch":
+        return await _register_branch_watch(arguments)
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -154,11 +190,29 @@ async def _get_review_comments(pr_number: int) -> list[types.TextContent]:
     return [types.TextContent(type="text", text=json.dumps(asdict(payload)))]
 
 
+async def _register_branch_watch(arguments: dict) -> list[types.TextContent]:
+    from src.db import store_branch_watch
+
+    branch = arguments["branch"]
+    session_id = arguments.get("session_id", "default")
+    store_branch_watch(branch, session_id)
+    result = json.dumps({"ok": True, "branch": branch, "session_id": session_id})
+    return [types.TextContent(type="text", text=result)]
+
+
 async def main() -> None:
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream, write_stream, server.create_initialization_options()
-        )
+    drain_task = asyncio.create_task(_drain_channel())
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream, write_stream, server.create_initialization_options()
+            )
+    finally:
+        drain_task.cancel()
+        try:
+            await drain_task
+        except asyncio.CancelledError:
+            pass  # expected on clean shutdown
 
 
 if __name__ == "__main__":

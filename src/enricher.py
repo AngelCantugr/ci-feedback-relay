@@ -214,5 +214,16 @@ def _is_high_signal(payload: CIFailurePayload) -> bool:
 
 
 async def _push_to_channel(payload: CIFailurePayload) -> None:
-    """Push to Claude Code channel. Stub — implemented in Phase 5 (#30)."""
-    pass
+    from src.channel import push_channel_event
+
+    # circuit_breaker and recommended_response are promoted to top-level so channel
+    # consumers can filter/route without deserializing the full nested payload blob.
+    await push_channel_event(
+        {
+            "source": "ci-feedback-relay",
+            "event_type": "ci_failure",
+            "payload": asdict(payload),
+            "circuit_breaker": asdict(payload.circuit_breaker),
+            "recommended_response": payload.recommended_response.value,
+        }
+    )

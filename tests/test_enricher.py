@@ -514,3 +514,69 @@ def test_is_high_signal_false_when_no_regressions_and_not_tripped():
         recommended_response=RecommendedResponse.IGNORE,
     )
     assert _is_high_signal(payload) is False
+
+
+# ---------------------------------------------------------------------------
+# _push_to_channel integration tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_push_to_channel_called_for_high_signal(
+    db, mock_push_none, mock_cause_agent_none, monkeypatch
+):
+    """_push_to_channel (via push_channel_event in src.channel) must be called for regressions."""
+    from unittest.mock import AsyncMock
+
+    mock_channel_push = AsyncMock()
+    monkeypatch.setattr("src.channel.push_channel_event", mock_channel_push)
+
+    # Pre-seed main branch with a different test → test_bar is a regression
+    existing = {
+        "actionable_failures": [{"test_id": "tests/test_other.py::test_other"}],
+    }
+    db.store_enriched_failure("base-sha", "main", "org/repo", None, 11, "CI", existing)
+
+    from src.enricher import process_ci_failure
+
+    output = (
+        "FAILED tests/test_foo.py::test_bar - AssertionError: expected True got False"
+    )
+    payload = _make_payload(sha="high-signal-sha", output_text=output)
+    await process_ci_failure(payload)
+
+    mock_channel_push.assert_awaited_once()
+    call_kwargs = mock_channel_push.call_args[0][0]
+    assert call_kwargs["source"] == "ci-feedback-relay"
+    assert call_kwargs["event_type"] == "ci_failure"
+    assert "recommended_response" in call_kwargs
+    assert "circuit_breaker" in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_push_to_channel_not_called_for_low_signal(
+    db, mock_push_none, mock_cause_agent_none, monkeypatch
+):
+    """_push_to_channel must NOT be called when there are no regressions and CB not tripped."""
+    from unittest.mock import AsyncMock
+
+    mock_channel_push = AsyncMock()
+    monkeypatch.setattr("src.channel.push_channel_event", mock_channel_push)
+
+    # Pre-seed main branch with the same test → was_passing_on_base=False (not a regression)
+    existing = {
+        "actionable_failures": [{"test_id": "tests/test_foo.py::test_bar"}],
+    }
+    db.store_enriched_failure("base-sha2", "main", "org/repo", None, 20, "CI", existing)
+
+    from src.enricher import process_ci_failure
+
+    output = (
+        "FAILED tests/test_foo.py::test_bar - AssertionError: expected True got False"
+    )
+    payload = _make_payload(
+        sha="low-signal-sha", output_text=output, head_branch="main"
+    )
+    await process_ci_failure(payload)
+
+    mock_channel_push.assert_not_awaited()
