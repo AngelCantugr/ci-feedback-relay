@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ci-feedback-relay": {
+      "command": "python",
+      "args": ["-m", "src.mcp_server"],
+      "cwd": "/Users/angelcantu/GithubRepositories/angelcantugr/ci-feedback-relay/main"
+    }
+  }
+}
