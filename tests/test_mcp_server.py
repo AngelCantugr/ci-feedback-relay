@@ -125,3 +125,159 @@ async def test_list_tools_schema_has_sha_required(db):
     tool = next(t for t in tools if t.name == "get_ci_failure_context")
     assert "sha" in tool.inputSchema["properties"]
     assert "sha" in tool.inputSchema["required"]
+
+
+# ---------------------------------------------------------------------------
+# list_tools: exposes get_branch_context and get_review_comments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_tools_contains_all_three_tools(db):
+    """list_tools must expose all three tools."""
+    from src.mcp_server import list_tools
+
+    tools = await list_tools()
+    names = [t.name for t in tools]
+    assert "get_ci_failure_context" in names
+    assert "get_branch_context" in names
+    assert "get_review_comments" in names
+
+
+# ---------------------------------------------------------------------------
+# _get_branch_context: nonexistent branch → BranchContextPayload(ci_status="none")
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_branch_context_nonexistent_branch(db, monkeypatch):
+    """get_branch_context must return BranchContextPayload(ci_status='none') for a missing branch."""
+    from unittest.mock import MagicMock
+
+    mock_repo = MagicMock()
+    mock_repo.get_branch.side_effect = Exception("Branch not found")
+    mock_github = MagicMock()
+    mock_github.get_repo.return_value = mock_repo
+
+    import src.github_client as gc_mod
+
+    monkeypatch.setattr(gc_mod, "get_github_client", lambda: mock_github)
+
+    from src.mcp_server import _get_branch_context
+
+    result = await _get_branch_context("nonexistent-branch")
+
+    assert len(result) == 1
+    data = json.loads(result[0].text)
+    assert data["ci_status"] == "none"
+    assert data["branch"] == "nonexistent-branch"
+    assert data["event_type"] == "branch_context"
+
+
+# ---------------------------------------------------------------------------
+# call_tool: routes to _get_branch_context
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_call_tool_get_branch_context_nonexistent(db, monkeypatch):
+    """call_tool('get_branch_context', ...) must return BranchContextPayload for missing branch."""
+    from unittest.mock import MagicMock
+
+    mock_repo = MagicMock()
+    mock_repo.get_branch.side_effect = Exception("Branch not found")
+    mock_github = MagicMock()
+    mock_github.get_repo.return_value = mock_repo
+
+    import src.github_client as gc_mod
+
+    monkeypatch.setattr(gc_mod, "get_github_client", lambda: mock_github)
+
+    from src.mcp_server import call_tool
+
+    result = await call_tool("get_branch_context", {"branch": "no-such-branch"})
+
+    assert len(result) == 1
+    data = json.loads(result[0].text)
+    assert data["ci_status"] == "none"
+
+
+# ---------------------------------------------------------------------------
+# _get_review_comments: no rows → empty blocking_comments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_review_comments_empty(db):
+    """get_review_comments(999) must return empty blocking_comments, not raise."""
+    from src.mcp_server import _get_review_comments
+
+    result = await _get_review_comments(999)
+
+    assert len(result) == 1
+    data = json.loads(result[0].text)
+    assert data["pr_number"] == 999
+    assert data["blocking_comments"] == []
+    assert data["total_comments"] == 0
+    assert data["event_type"] == "review_comments"
+
+
+# ---------------------------------------------------------------------------
+# _get_review_comments: author_type is populated from SQLite
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_review_comments_with_blocking_comment(db):
+    """get_review_comments must return blocking comments with author_type from SQLite."""
+    db.store_review_comment(
+        pr_number=42,
+        repo="angelcantugr/ci-feedback-relay",
+        comment_id=1001,
+        author="alice",
+        author_type="human_review",
+        body="Please fix this.",
+        file_path="src/foo.py",
+        line=10,
+        is_blocking=True,
+    )
+    db.store_review_comment(
+        pr_number=42,
+        repo="angelcantugr/ci-feedback-relay",
+        comment_id=1002,
+        author="coderabbit[bot]",
+        author_type="ai_review",
+        body="Minor suggestion.",
+        is_blocking=False,
+    )
+
+    from src.mcp_server import _get_review_comments
+
+    result = await _get_review_comments(42)
+
+    assert len(result) == 1
+    data = json.loads(result[0].text)
+    assert data["pr_number"] == 42
+    assert data["total_comments"] == 2
+    assert len(data["blocking_comments"]) == 1
+    comment = data["blocking_comments"][0]
+    assert comment["author_type"] == "human_review"
+    assert comment["author"] == "alice"
+    assert comment["is_blocking"] is True
+
+
+# ---------------------------------------------------------------------------
+# call_tool: routes to _get_review_comments
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_call_tool_get_review_comments(db):
+    """call_tool('get_review_comments', ...) must delegate to _get_review_comments."""
+    from src.mcp_server import call_tool
+
+    result = await call_tool("get_review_comments", {"pr_number": 999})
+
+    assert len(result) == 1
+    data = json.loads(result[0].text)
+    assert data["blocking_comments"] == []

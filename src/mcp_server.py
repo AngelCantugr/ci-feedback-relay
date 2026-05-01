@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import asdict
 
 from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
 from src.db import get_enriched_failure
+from src.db import get_review_comments as db_get_review_comments
+from src.models import BranchContextPayload, ReviewComment, ReviewCommentsPayload
 
 server = Server("ci-feedback-relay")
 
@@ -36,7 +39,39 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["sha"],
             },
         ),
-        # get_branch_context and get_review_comments added in Issue AngelCantugr/ci-feedback-relay#28
+        types.Tool(
+            name="get_branch_context",
+            description=(
+                "Get the current state of a branch: HEAD SHA, commits ahead of base, "
+                "CI status, open PR number, and whether there is a merge conflict. "
+                "Use this to orient before making changes on the branch."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "branch": {
+                        "type": "string",
+                        "description": "Branch name (e.g. feature/my-fix)",
+                    }
+                },
+                "required": ["branch"],
+            },
+        ),
+        types.Tool(
+            name="get_review_comments",
+            description=(
+                "Get blocking review comments for a pull request, filtered to is_blocking=true. "
+                "Each comment includes author_type (human_review | ai_review | ci_automated | agent_self) "
+                "so the agent can focus on human feedback and ignore bot noise."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pr_number": {"type": "integer", "description": "GitHub PR number"}
+                },
+                "required": ["pr_number"],
+            },
+        ),
     ]
 
 
@@ -44,6 +79,10 @@ async def list_tools() -> list[types.Tool]:
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if name == "get_ci_failure_context":
         return await _get_ci_failure_context(arguments["sha"])
+    if name == "get_branch_context":
+        return await _get_branch_context(arguments["branch"])
+    if name == "get_review_comments":
+        return await _get_review_comments(int(arguments["pr_number"]))
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -57,6 +96,62 @@ async def _get_ci_failure_context(sha: str) -> list[types.TextContent]:
             )
         ]
     return [types.TextContent(type="text", text=json.dumps(payload))]
+
+
+async def _get_branch_context(branch: str) -> list[types.TextContent]:
+    from src.github_client import get_github_client
+
+    g = get_github_client()
+    repo = g.get_repo("angelcantugr/ci-feedback-relay")  # Layer 1: single repo
+
+    try:
+        br = repo.get_branch(branch)
+        head_sha = br.commit.sha
+    except Exception:
+        payload = BranchContextPayload(branch=branch, ci_status="none")
+        return [types.TextContent(type="text", text=json.dumps(asdict(payload)))]
+
+    commit = repo.get_commit(head_sha)
+    statuses = list(commit.get_statuses())
+    ci_status = statuses[0].state if statuses else "none"
+
+    pulls = list(repo.get_pulls(state="open", head=f"angelcantugr:{branch}"))
+    pr_number = pulls[0].number if pulls else None
+
+    comparison = repo.compare("main", branch)
+    payload = BranchContextPayload(
+        branch=branch,
+        head_sha=head_sha,
+        commits_ahead_of_base=comparison.ahead_by,
+        base_branch="main",
+        ci_status=ci_status,
+        open_pr_number=pr_number,
+        has_merge_conflict=(comparison.status == "diverged"),
+    )
+    return [types.TextContent(type="text", text=json.dumps(asdict(payload)))]
+
+
+async def _get_review_comments(pr_number: int) -> list[types.TextContent]:
+    rows = db_get_review_comments(pr_number, "angelcantugr/ci-feedback-relay")
+    blocking = [
+        ReviewComment(
+            comment_id=r["comment_id"],
+            body=r["body"],
+            author=r["author"],
+            author_type=r["author_type"],
+            file_path=r["file_path"],
+            line=r["line"],
+            is_blocking=bool(r["is_blocking"]),
+        )
+        for r in rows
+        if r["is_blocking"]
+    ]
+    payload = ReviewCommentsPayload(
+        pr_number=pr_number,
+        blocking_comments=blocking,
+        total_comments=len(rows),
+    )
+    return [types.TextContent(type="text", text=json.dumps(asdict(payload)))]
 
 
 async def main() -> None:
