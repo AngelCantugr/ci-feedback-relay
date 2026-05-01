@@ -67,3 +67,15 @@ async def handle_webhook(
                 asyncio.create_task(process_review(payload))
 
     return {"ok": True}
+
+
+@app.post("/internal/register-watch")
+async def register_watch(request: Request) -> dict[str, bool]:
+    body = await request.json()
+    branch = body.get("branch", "")
+    if not branch or not isinstance(branch, str):
+        raise HTTPException(status_code=422, detail="Missing required field: branch")
+    from src.db import store_branch_watch
+
+    store_branch_watch(branch, body.get("session_id", "default"))
+    return {"ok": True}

@@ -133,8 +133,8 @@ async def test_list_tools_schema_has_sha_required(db):
 
 
 @pytest.mark.asyncio
-async def test_list_tools_contains_all_three_tools(db):
-    """list_tools must expose all three tools."""
+async def test_list_tools_contains_all_four_tools(db):
+    """list_tools must expose all four tools."""
     from src.mcp_server import list_tools
 
     tools = await list_tools()
@@ -142,6 +142,7 @@ async def test_list_tools_contains_all_three_tools(db):
     assert "get_ci_failure_context" in names
     assert "get_branch_context" in names
     assert "get_review_comments" in names
+    assert "register_branch_watch" in names
 
 
 # ---------------------------------------------------------------------------
@@ -281,3 +282,38 @@ async def test_call_tool_get_review_comments(db):
     assert len(result) == 1
     data = json.loads(result[0].text)
     assert data["blocking_comments"] == []
+
+
+# ---------------------------------------------------------------------------
+# register_branch_watch tool
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_register_branch_watch_success(db):
+    """register_branch_watch must return ok=True with branch and session_id."""
+    from src.mcp_server import _register_branch_watch
+
+    result = await _register_branch_watch(
+        {"branch": "feature/new", "session_id": "ses-1"}
+    )
+
+    assert len(result) == 1
+    data = json.loads(result[0].text)
+    assert data["ok"] is True
+    assert data["branch"] == "feature/new"
+    assert data["session_id"] == "ses-1"
+
+
+@pytest.mark.asyncio
+async def test_register_branch_watch_default_session(db):
+    """register_branch_watch without session_id must default to 'default'."""
+    from src.mcp_server import _register_branch_watch
+
+    result = await _register_branch_watch({"branch": "main"})
+
+    assert len(result) == 1
+    data = json.loads(result[0].text)
+    assert data["ok"] is True
+    assert data["branch"] == "main"
+    assert data["session_id"] == "default"

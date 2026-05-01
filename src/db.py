@@ -60,6 +60,12 @@ CREATE TABLE IF NOT EXISTS circuit_breaker (
     tripped         INTEGER DEFAULT 0,
     UNIQUE(repo_full_name, sha, check_run_id)
 );
+
+CREATE TABLE IF NOT EXISTS watched_branches (
+    branch          TEXT    PRIMARY KEY,
+    session_id      TEXT    NOT NULL DEFAULT 'default',
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -215,6 +221,20 @@ def get_review_comments(pr_number: int, repo: str) -> list[dict]:
             (pr_number, repo),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def store_branch_watch(branch: str, session_id: str = "default") -> None:
+    """INSERT OR REPLACE a branch watch — updates session_id for the same branch."""
+    from datetime import datetime, timezone
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO watched_branches (branch, session_id, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (branch, session_id, datetime.now(tz=timezone.utc).isoformat()),
+        )
 
 
 def increment_circuit_breaker(

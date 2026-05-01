@@ -189,3 +189,33 @@ def test_json_roundtrip_enriched_failure(db):
     result = db.get_enriched_failure("sha-json")
     assert result == data
     assert isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
+# store_branch_watch
+# ---------------------------------------------------------------------------
+
+
+def test_store_branch_watch_basic(db):
+    """store_branch_watch persists branch and session_id and can be retrieved."""
+    db.store_branch_watch("feature/test", "session-abc")
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT branch, session_id FROM watched_branches WHERE branch = ?",
+            ("feature/test",),
+        ).fetchone()
+    assert row is not None
+    assert row["branch"] == "feature/test"
+    assert row["session_id"] == "session-abc"
+
+
+def test_store_branch_watch_idempotent(db):
+    """Calling store_branch_watch twice with the same branch updates session_id (INSERT OR REPLACE)."""
+    db.store_branch_watch("main", "session-1")
+    db.store_branch_watch("main", "session-2")
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT session_id FROM watched_branches WHERE branch = 'main'"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == "session-2"

@@ -286,3 +286,27 @@ def test_invalid_signature_does_not_store_event(tmp_path, monkeypatch):
                 },
             )
     mock_store.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# /internal/register-watch endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_register_watch_endpoint(client):
+    """POST /internal/register-watch with branch must return ok=True."""
+    resp = client.post(
+        "/internal/register-watch",
+        json={"branch": "main"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
+def test_register_watch_endpoint_missing_branch(client):
+    """POST /internal/register-watch without branch must return 422."""
+    resp = client.post(
+        "/internal/register-watch",
+        json={"session_id": "abc"},
+    )
+    assert resp.status_code == 422
