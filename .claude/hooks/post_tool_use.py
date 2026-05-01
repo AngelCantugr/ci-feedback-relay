@@ -5,7 +5,10 @@ import sys
 
 import httpx
 
-hook_input = json.loads(sys.stdin.read())
+try:
+    hook_input = json.loads(sys.stdin.read())
+except Exception:
+    hook_input = {}
 
 tool_name = hook_input.get("tool_name", "")
 tool_input = hook_input.get("tool_input", {})
